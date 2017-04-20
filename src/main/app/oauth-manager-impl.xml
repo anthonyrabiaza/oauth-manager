@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:context="http://www.springframework.org/schema/context" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:json="http://www.mulesoft.org/schema/mule/json" xmlns:ldap="http://www.mulesoft.org/schema/mule/ldap" xmlns:objectstore="http://www.mulesoft.org/schema/mule/objectstore" xmlns:scripting="http://www.mulesoft.org/schema/mule/scripting" xmlns:smtp="http://www.mulesoft.org/schema/mule/smtp" xmlns:spring="http://www.springframework.org/schema/beans" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/json http://www.mulesoft.org/schema/mule/json/current/mule-json.xsd
+http://www.mulesoft.org/schema/mule/ldap http://www.mulesoft.org/schema/mule/ldap/current/mule-ldap.xsd
+http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/current/mule-scripting.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/objectstore http://www.mulesoft.org/schema/mule/objectstore/current/mule-objectstore.xsd
+http://www.mulesoft.org/schema/mule/smtp http://www.mulesoft.org/schema/mule/smtp/current/mule-smtp.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-current.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd">
+    <flow name="post:/user/register">
+        <object-to-string-transformer doc:name="Convert JSON to String" />
+        <dw:transform-message doc:name="Create Request Variable">
+            <dw:set-variable variableName="request"><![CDATA[%dw 1.0
+%output application/java
+---
+payload]]></dw:set-variable>
+        </dw:transform-message>
+        <enricher target="#[flowVars.result]" doc:name="Message Enricher">
+            <processor-chain doc:name="Processor Chain">
+                <ldap:exists config-ref="ldap.config" dn="#['cn='+request.username+',']${ldap.user.search.filter.1}" doc:name="Check User Existence" />
+                <set-payload value="#[payload]" doc:name="Set Result" />
+            </processor-chain>
+        </enricher>
+        <choice doc:name="User Already Exists?">
+            <when expression="#[result != true]">
+                <set-variable variableName="msgId" value="#[message.id]" doc:name="Get Message ID" />
+                <objectstore:store config-ref="registration.store" key="#[message.id]" value-ref="#[payload]" doc:name="Store Request For 1h" />
+                <set-variable variableName="endpoint" value="${email.validation.url}" doc:name="Get Endpoint"/>
+                <parse-template location="html/registration.email.html" doc:name="Build Email"/>
+                <smtp:outbound-endpoint host="${smtp.host}" port="${smtp.port}" user="${smtp.username}" password="${smtp.password}" connector-ref="Gmail" to="#[request.email]" from="${smtp.sender} &lt;${smtp.noreply}&gt;" subject="[OAuth Manager] Registration Confirmation" replyTo="${smtp.noreply}" responseTimeout="10000" doc:name="Send Confirmation Email for Validation" />
+                <dw:transform-message doc:name="Build Response Message">
+                    <dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+---
+{
+	id: flowVars.msgId,
+	msg: "registration completed"
+}]]></dw:set-payload>
+                </dw:transform-message>
+            </when>
+            <otherwise>
+                <set-property propertyName="http.status" value="401" doc:name="401" />
+                <dw:transform-message doc:name="Build Response Message">
+                    <dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+---
+{
+	msg: "User already exists"
+}]]></dw:set-payload>
+                </dw:transform-message>
+            </otherwise>
+        </choice>
+    </flow>
+    <flow name="get:/user/reset">
+        <ldap:search config-ref="ldap.config" baseDn="${ldap.user.search.filter.1}" filter="(cn=#[message.inboundProperties.'http.query.params'.username])" structuralObjectClass="organizationalPerson" doc:name="ldapSearch Question from Email Address"/>
+        <dw:transform-message doc:name="Build Response Message">
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+---
+{
+	question: payload.postalAddress[0]
+}]]></dw:set-payload>
+        </dw:transform-message>
+    </flow>
+    <flow name="patch:/user/reset">
+        <json:json-to-object-transformer returnClass="java.util.HashMap" doc:name="Convert JSON Request to Map" />
+        <enricher target="#[flowVars.result]" doc:name="Save Result">
+            <processor-chain doc:name="Processor Chain">
+                <ldap:search config-ref="ldap.config" baseDn="${ldap.user.search.filter.1}" filter="(&amp;(cn=#[payload.username])(postalCode=#[payload.answer]))" structuralObjectClass="person" doc:name="Match Answer" />
+                <set-payload value="#[payload.size().toString()]" doc:name="Set Result" />
+            </processor-chain>
+        </enricher>
+        <choice doc:name="Right Answer?">
+            <when expression="#[flowVars.result=='1']">
+                <scripting:component doc:name="Build LDAPEntry">
+                    <scripting:script engine="Groovy"><![CDATA[import org.mule.module.ldap.api.LDAPEntry;
+
+LDAPEntry entryToAdd = new LDAPEntry("cn="+payload.username+","+'${ldap.user.search.filter.1}');
+entryToAdd.addAttribute("userpassword", payload.password);
+
+return entryToAdd]]></scripting:script>
+                </scripting:component>
+                <ldap:modify config-ref="ldap.config" doc:name="LDAP Modify" />
+                <set-payload value="{&quot;msg&quot; : &quot;#[flowVars.result]&quot;}" doc:name="Password Updated" />
+            </when>
+            <otherwise>
+                <set-property propertyName="http.status" value="401" doc:name="401" />
+                <set-payload value="{&quot;msg&quot; : &quot;#[flowVars.result]&quot;}" doc:name="Wrong Answer" />
+            </otherwise>
+        </choice>
+    </flow>
+    <flow name="get:/access/pin">
+        <scripting:component doc:name="Generate Random 6 Digits PIN">
+            <scripting:script engine="Groovy"><![CDATA[def generator = { String alphabet, int n ->
+  new Random().with {
+    (1..n).collect { alphabet[ nextInt( alphabet.length() ) ] }.join()
+  }
+}
+
+return generator( (('A'..'Z')+('0'..'9')).join(), 6 )]]></scripting:script>
+        </scripting:component>
+        <enricher target="#[flowVars.email]" doc:name="Message Enricher">
+            <ldap:search config-ref="ldap.config" baseDn="${ldap.user.search.filter.1}" filter="(cn=#[message.inboundProperties.'http.query.params'.username])" doc:name="LDAP"/>
+        </enricher>
+        <objectstore:store config-ref="pin.store" key="#[message.inboundProperties.'http.query.params'.username+'-'+payload]" value-ref="#[true]" doc:name="Store PIN"/>
+        <parse-template location="html/accessPIN.email.html" doc:name="Parse Template"/>
+        <smtp:outbound-endpoint host="${smtp.host}" port="${smtp.port}" user="${smtp.username}" password="${smtp.password}" connector-ref="Gmail" to="#[flowVars.email[0].mail]" from="${smtp.sender}  &lt;${smtp.noreply}&gt;" subject="[OAuth Manager] Access PIN" replyTo="${smtp.noreply}" responseTimeout="10000" doc:name="Send PIN by Email" />
+        <set-payload value="{&quot;msg&quot; : &quot;one-time PIN sent via email&quot;}" doc:name="Build Result" />
+    </flow>
+    <flow name="get:/util/isExist/user">
+        <ldap:exists config-ref="ldap.config" dn="#['cn='+message.inboundProperties.'http.query.params'.get('username')+',']${ldap.user.search.filter.1}" doc:name="Check User Existence" />
+        <dw:transform-message doc:name="Return Result">
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+---
+{
+	isExist: payload
+}]]></dw:set-payload>
+        </dw:transform-message>
+    </flow>
+    <flow name="get:/util/getUsername">
+        <ldap:search config-ref="ldap.config" baseDn="${ldap.user.search.filter.1}" filter="(mail=#[message.inboundProperties.'http.query.params'.email])" doc:name="LDAP Search"/>
+        <parse-template location="html/username.email.html" doc:name="Build Email"/>
+        <smtp:outbound-endpoint host="${smtp.host}" port="${smtp.port}" user="${smtp.username}" password="${smtp.password}" connector-ref="Gmail" to="#[message.inboundProperties.'http.query.params'.email]" from="${smtp.sender}  &lt;${smtp.noreply}&gt;" subject="[OAuth Manager] Your Username" replyTo="${smtp.noreply}" responseTimeout="10000" doc:name="Send Username by Email"/>
+        <dw:transform-message doc:name="Transform Message">
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+---
+{
+	msg: 'Your username has been sent'
+}]]></dw:set-payload>
+        </dw:transform-message>
+    </flow>
+    <flow name="get:/util/isExist/email">
+        <ldap:search config-ref="ldap.config" baseDn="${ldap.user.search.filter.1}" filter="(mail=#[message.inboundProperties.'http.query.params'.email])" doc:name="LDAP"/>
+        <set-payload value="#[payload.size()==1 ? true : false]" doc:name="Set Payload"/>
+        <dw:transform-message doc:name="Return Result">
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+---
+{
+	isExist: payload
+}]]></dw:set-payload>
+        </dw:transform-message>
+    </flow>
+</mule>

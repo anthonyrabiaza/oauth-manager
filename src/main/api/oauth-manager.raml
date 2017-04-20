@@ -1,0 +1,117 @@
+#%RAML 0.8
+title: OAuth User/Access Manager
+version: 1.0
+baseUri: http://localhost:8081/api
+
+/user:
+  /register:
+    post:
+      body: 
+        application/json: 
+          example: |
+            {"firstname" : "Fisrt",
+             "lastname" : "Last",
+             "email" : "user.pass1@demo.org",
+             "username" : "user.pass1",
+             "password" : "pass1",             
+             "question" : "your own question",
+             "answer" : "your own answer"}
+      responses:
+        200: 
+          body: 
+            application/json: 
+              example: |
+                { "id" : "abcd",
+                  "msg" : "registration submitted"}
+        401:
+          body:
+            application/json: 
+              example: |
+                {"msg" : "registration error"}
+                                                  
+  /reset:
+    get:
+      queryParameters: 
+        username:
+          type: string
+          required: true
+      responses: 
+        200: 
+          body: 
+            application/json: 
+              example: |
+                {"question" : "your own question"}  
+    patch:
+      body: 
+        application/json: 
+          example: |
+            {
+              "username" : "kiet.yap",
+              "answer" : "my own answer",
+              "password" : "pass2"
+             }
+      responses: 
+        200: 
+          body: 
+            application/json: 
+              example: |
+                {"msg" : "password updated"}          
+        401: 
+          body: 
+            application/json: 
+              example: |
+                {"msg" : "wrong answer"}       
+
+/access:
+  /pin:
+    get:
+      queryParameters: 
+        username:
+          type: string
+          required: true    
+      responses: 
+        200: 
+          body: 
+            application/json: 
+              example: |
+                {"msg" : "one-time PIN sent via email"}  
+
+/util:
+  /isExist:
+    /user:
+      get:
+        queryParameters: 
+          username:
+            type: string
+            required: true    
+        responses: 
+          200: 
+            body: 
+              application/json: 
+                example: |
+                  {"isExist" : false}
+
+    /email:
+      get:
+        queryParameters: 
+          email:
+            type: string
+            required: true    
+        responses: 
+          200: 
+            body: 
+              application/json: 
+                example: |
+                  {"isExist" : false}                              
+  /getUsername:
+    get:
+      queryParameters: 
+        email:
+          type: string
+          required: true    
+      responses: 
+        200: 
+          body: 
+            application/json: 
+              example: |
+                {"msg" : "Username has been emailed"}  

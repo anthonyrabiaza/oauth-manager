@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:api-platform-gw="http://www.mulesoft.org/schema/mule/api-platform-gw"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:apikit="http://www.mulesoft.org/schema/mule/apikit" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:spring="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/api-platform-gw http://www.mulesoft.org/schema/mule/api-platform-gw/current/mule-api-platform-gw.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/apikit http://www.mulesoft.org/schema/mule/apikit/current/mule-apikit.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.1.xsd">
+    <http:listener-config name="oauth-manager-httpListenerConfig" host="0.0.0.0" port="${https.port}" doc:name="HTTP Listener Configuration" protocol="HTTPS" tlsContext-ref="tls.context.listener"/>
+    <apikit:config name="oauth-manager-config" raml="oauth-manager.raml" consoleEnabled="false" doc:name="Router"/>
+    <api-platform-gw:api apiName="${oauth.provider.name}" version="${oauth.provider.version}" flowRef="oauth-manager-main" create="true" doc:name="API Autodiscovery"/>
+    <flow name="oauth-manager-main">
+        <http:listener config-ref="oauth-manager-httpListenerConfig" path="/api/*" doc:name="HTTP"/>
+        <apikit:router config-ref="oauth-manager-config" doc:name="APIkit Router"/>
+        <exception-strategy ref="oauth-manager-apiKitGlobalExceptionMapping" doc:name="Reference Exception Strategy"/>
+    </flow>
+    <flow name="oauth-manager-console">
+        <http:listener config-ref="oauth-manager-httpListenerConfig" path="/console/*" doc:name="HTTP"/>
+        <apikit:console config-ref="oauth-manager-config" doc:name="APIkit Console"/>
+    </flow>
+    <flow name="patch:/user/reset:oauth-manager-config">
+        <flow-ref name="patch:/user/reset" doc:name="patch:/user/reset"/>
+    </flow>
+    <flow name="get:/util/getUsername:oauth-manager-config">
+        <flow-ref name="get:/util/getUsername" doc:name="get:/util/getUsername"/>
+    </flow>
+    <flow name="get:/util/isExist/email:oauth-manager-config">
+        <flow-ref name="get:/util/isExist/email" doc:name="get:/util/isExist/email"/>
+    </flow>
+    <flow name="get:/util/isExist/user:oauth-manager-config">
+        <flow-ref name="get:/util/isExist/user" doc:name="get:/util/isExist/user"/>
+    </flow>
+    <flow name="get:/access/pin:oauth-manager-config">
+        <flow-ref name="get:/access/pin" doc:name="get:/access/pin"/>
+    </flow>
+    <flow name="get:/user/reset:oauth-manager-config">
+        <flow-ref name="get:/user/reset" doc:name="get:/user/reset"/>
+    </flow>
+    <flow name="post:/user/register:oauth-manager-config">
+        <flow-ref name="post:/user/register" doc:name="post:/user/register"/>
+    </flow>
+    <apikit:mapping-exception-strategy name="oauth-manager-apiKitGlobalExceptionMapping">
+        <apikit:mapping statusCode="404">
+            <apikit:exception value="org.mule.module.apikit.exception.NotFoundException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Resource not found&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="405">
+            <apikit:exception value="org.mule.module.apikit.exception.MethodNotAllowedException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Method not allowed&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="415">
+            <apikit:exception value="org.mule.module.apikit.exception.UnsupportedMediaTypeException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Unsupported media type&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="406">
+            <apikit:exception value="org.mule.module.apikit.exception.NotAcceptableException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Not acceptable&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="400">
+            <apikit:exception value="org.mule.module.apikit.exception.BadRequestException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Bad request&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+    </apikit:mapping-exception-strategy>
+</mule>

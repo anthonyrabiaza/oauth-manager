@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:json="http://www.mulesoft.org/schema/mule/json"
+	xmlns:objectstore="http://www.mulesoft.org/schema/mule/objectstore"
+	xmlns:ldap="http://www.mulesoft.org/schema/mule/ldap"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" 
+xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" 
+xmlns:scripting="http://www.mulesoft.org/schema/mule/scripting" 
+xmlns="http://www.mulesoft.org/schema/mule/core" 
+xmlns:core="http://www.mulesoft.org/schema/mule/core" 
+xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" 
+xmlns:spring="http://www.springframework.org/schema/beans" 
+xmlns:ss="http://www.springframework.org/schema/security"
+xmlns:mule-ss="http://www.mulesoft.org/schema/mule/spring-security"
+xmlns:tls="http://www.mulesoft.org/schema/mule/tls" 
+xmlns:oauth2-provider="http://www.mulesoft.org/schema/mule/oauth2-provider"
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+
+xsi:schemaLocation="http://www.mulesoft.org/schema/mule/json http://www.mulesoft.org/schema/mule/json/current/mule-json.xsd
+http://www.mulesoft.org/schema/mule/objectstore http://www.mulesoft.org/schema/mule/objectstore/current/mule-objectstore.xsd
+http://www.mulesoft.org/schema/mule/ldap http://www.mulesoft.org/schema/mule/ldap/current/mule-ldap.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-current.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/current/mule-scripting.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.springframework.org/schema/security http://www.springframework.org/schema/security/spring-security-3.1.xsd
+http://www.mulesoft.org/schema/mule/tls http://www.mulesoft.org/schema/mule/tls/current/mule-tls.xsd
+http://www.mulesoft.org/schema/mule/oauth2-provider http://www.mulesoft.org/schema/mule/oauth2-provider/current/mule-oauth2-provider.xsd
+http://www.mulesoft.org/schema/mule/spring-security http://www.mulesoft.org/schema/mule/spring-security/current/mule-spring-security.xsd">
+
+	<!-- LDAP Validation Config -->
+     <spring:beans>
+        <spring:bean id="multiple-users-ldap-context-source" class="org.springframework.security.ldap.DefaultSpringSecurityContextSource">
+            <spring:constructor-arg value="${ldap.url}"/>
+            <spring:property name="userDn" value="${ldap.userDn}"/>
+            <spring:property name="password" value="${ldap.password}"/>
+            <spring:property name="baseEnvironmentProperties">
+                <spring:map>
+                    <spring:entry key="java.naming.ldap.version" value="3"/>
+                    <spring:entry key="com.sun.jndi.ldap.connect.pool" value="true"/>
+                    <spring:entry key="com.sun.jndi.ldap.connect.pool.maxsize" value="10"/>
+                    <spring:entry key="com.sun.jndi.ldap.connect.pool.prefsize" value="5"/>
+                    <spring:entry key="com.sun.jndi.ldap.connect.pool.initsize" value="3"/>
+                    <spring:entry key="com.sun.jndi.ldap.connect.timeout" value="10000"/>
+                    <spring:entry key="com.sun.jndi.ldap.connect.pool.timeout" value="60000"/>
+                    <spring:entry key="com.sun.jndi.ldap.connect.pool.protocol" value="plain"/>
+                </spring:map>
+            </spring:property>
+        </spring:bean>
+
+        <spring:bean id="multiple-users-ldap-user-search" class="org.springframework.security.ldap.search.FilterBasedLdapUserSearch">
+            <spring:constructor-arg index="0" value="${ldap.user.search.filter.1}"/>
+            <spring:constructor-arg index="1" value="${ldap.user.search.filter.2}"/>
+            <spring:constructor-arg index="2" ref="multiple-users-ldap-context-source"/>
+            <spring:property name="searchSubtree" value="false"/>
+        </spring:bean>
+
+        <spring:bean id="multiple-users-ldap-auth-provider" class="org.springframework.security.ldap.authentication.LdapAuthenticationProvider">
+            <spring:constructor-arg>
+                <spring:bean class="org.springframework.security.ldap.authentication.BindAuthenticator">
+                    <spring:constructor-arg ref="multiple-users-ldap-context-source"/>
+                    <spring:property name="userSearch" ref="multiple-users-ldap-user-search"/>
+                </spring:bean>
+            </spring:constructor-arg>
+        </spring:bean>
+    
+        <ss:authentication-manager id="multiple-users-authentication-manager" alias="ldapAuthManager">
+            <ss:authentication-provider ref="multiple-users-ldap-auth-provider"/>
+        </ss:authentication-manager>
+    </spring:beans>
+
+	<!-- Validation endpoint -->
+    <tls:context name="tls.context.listener" doc:name="TLS Context">
+	    <tls:key-store path="${key.store.path}" password="${key.store.password}" keyPassword="${key.store.key.password}"/>
+    </tls:context>
+   
+    
+    <flow name="validateTokenFlow">
+        <http:listener config-ref="oauth-manager-httpListenerConfig" path="${oauth.validate.endpoint.path}" doc:name="/oauth_validate"/>
+        <oauth2-provider:validate config-ref="external-oauth2-provider" scopes="${scopes}" doc:name="OAuth provider module"/>
+        <custom-processor class="com.mulesoft.module.oauth2.ValidatorResponseBuilder" doc:name="Custom Processor"/>
+    </flow>
+
+    <flow name="validateLdapGroup">
+        <http:listener config-ref="oauth-manager-httpListenerConfig" path="/${ldap.group.validate.endpoint.path}/{apiName}/{apiVersion}/{user}" doc:name="/ldap_validate"/>
+        <ldap:search config-ref="ldap.config" baseDn="${ldap.org.name},${ldap.group.search.filter.1}" filter="(&amp;(objectclass=groupOfUniqueNames)(description=#[message.inboundProperties.'http.uri.params'.get('apiName')])(cn=#[message.inboundProperties.'http.uri.params'.get('apiVersion')])(uniquemember=cn=#[message.inboundProperties.'http.uri.params'.get('user')]*))" scope="SUB_TREE" doc:name="user in API group?"/>
+        <set-payload value="#[payload.size()&gt;0 ? 'true' : 'false']" doc:name="return 'true' or 'false'"/>
+    </flow>
+    <flow name="validatePin">
+        <http:listener config-ref="oauth-manager-httpListenerConfig" path="/${pin.validate.endpoint.path}" allowedMethods="GET" doc:name="/pin_check"/>
+        <objectstore:retrieve config-ref="pin.store" key="#[message.inboundProperties.'http.query.params'.get('principal')+'-'+message.inboundProperties.'http.query.params'.get('pin')]" defaultValue-ref="#[false]" doc:name="Check If PIN exists or valids"/>
+        <set-payload value="#[payload ? 'true' : 'false']" doc:name="Return 'true' of 'false'"/>
+    </flow>  
+    
+    <flow name="validateRegistration">
+        <http:listener config-ref="oauth-manager-httpListenerConfig" path="${registration.validate.endpoint.path}" doc:name="/validate?id"/>
+        <message-properties-transformer scope="invocation" doc:name="Retrieve properties">
+            <add-message-property key="success_url" value="${http.register.success.url}"/>
+            <add-message-property key="success_refresh" value="${http.register.success.refresh}"/>
+            <add-message-property key="error_url" value="${http.register.error.url}"/>
+            <add-message-property key="error_refresh" value="${http.register.error.refresh}"/>            
+        </message-properties-transformer>
+        <objectstore:retrieve config-ref="registration.store" key="#[message.inboundProperties.'http.query.params'.id]" doc:name="Retrieve Submitted Request from Confirmation Email"/>
+        <json:json-to-object-transformer returnClass="java.util.HashMap" doc:name="Convert Request to Map"/>
+        <scripting:component doc:name="Build LDAPEntry">
+            <scripting:script engine="Groovy"><![CDATA[import org.mule.module.ldap.api.LDAPEntry;
+
+LDAPEntry entryToAdd = new LDAPEntry("cn="+payload.username+","+'${ldap.user.search.filter.1}');
+entryToAdd.addAttribute("objectclass", ["top", "organizationalPerson", "person", "inetOrgPerson"]);
+entryToAdd.addAttribute("uid", payload.username);
+entryToAdd.addAttribute("userpassword", payload.password);
+entryToAdd.addAttribute("givenname", payload.firstname);
+entryToAdd.addAttribute("sn", payload.lastname);
+entryToAdd.addAttribute("mail", payload.email);
+entryToAdd.addAttribute("postalAddress", payload.question);
+
+
+
+return entryToAdd]]></scripting:script>
+        </scripting:component>
+        <ldap:add config-ref="ldap.config" doc:name="LDAP Add"/>
+        <parse-template location="html/redirect.html" doc:name="Build Success Redirect Page"/>
+        <set-property propertyName="Content-type" value="text/html" doc:name="text/html"/>
+        <catch-exception-strategy doc:name="Catch Exception Strategy">
+            <parse-template location="html/error.html" doc:name="Build Error Redirect Page"/>
+            <set-property propertyName="Content-type" value="text/html" doc:name="text/html"/>
+        </catch-exception-strategy>
+    </flow>      
+</mule>
